@@ -30,7 +30,8 @@
 | `docs/07-bluetooth-remote.md` | 蓝牙遥控"第二次连接要重新配对"的定位与模型 |
 | `scripts/` | 四个运维脚本（路径已参数化，见各文件头注释） |
 | `orient-tile/` | 磁贴 App 完整源码 + 手工打包脚本（不依赖 Gradle） |
-| `skill/flip5-adb-ops/` | 可安装的 Qoder Skill 版本（发布变体：路径占位化）；本机另有一份带真实路径的工作副本 |
+| `skill/flip5-adb-ops/` | 本机专用 skill 的发布变体（路径占位化）；本机另有一份带真实路径的工作副本 |
+| `skills/` | 六个通用 skill（adb 运维 / 显示覆盖 / Odin 刷机 / APK 审计 / 无 Gradle 构建 / BLE HID 遥控诊断），拷到 `~/.qoder-cn/skills/` 即可用 |
 
 ## 三条最重要的结论
 
