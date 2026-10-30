@@ -1,0 +1,162 @@
+#!/system/bin/sh
+# Flip5 手机端显示档位 watcher（shell 权限，无需电脑）
+# 职责：外接屏插拔切亮度/ignore-orientation；按"方向+策略"切画布；旋转只做恢复与学习（事实源=磁贴）
+# 日志：/data/local/tmp/flip5-profile-phone.log
+
+LOG=/data/local/tmp/flip5-profile-phone.log
+INTERVAL=2
+STRATEGY=S2          # 用户定案 2026-10-29：横M 竖M = 显示器永远 1:1
+DENSITY=320          # 负载配置：sw800dp+xlrg 双保险过平板阈值；勿 reset 回 480
+MODE_KEY=flip5_orient_mode   # Settings.Secure，存 user_rotation 0-3
+
+log() { echo "$(date '+%m-%d %H:%M:%S')  $1" >> $LOG; }
+
+# watchdog：外壳进程命令行不含 "worker"，被拦截/清理类程序杀掉 worker 时 2 秒内重启。
+# 杀 worker：pkill -f 'phone-watcher.sh worker'；全杀：pkill -f 'phone-watche[r]'
+if [ "$1" != "worker" ]; then
+    log "=== watchdog 启动 pid=$$ ==="
+    while :; do
+        sh "$0" worker
+        log "worker 退出 rc=$? ，2 秒后重启"
+        sleep 2
+    done
+fi
+
+ext_res() {
+    dumpsys display 2>/dev/null | grep -o 'type=EXTERNAL, valid=true, isActive=true[^}]*' \
+        | grep -o 'deviceWidth=[0-9]*, deviceHeight=[0-9]*' | head -1 \
+        | sed 's/deviceWidth=\([0-9]*\), deviceHeight=\([0-9]*\)/\1 \2/'
+}
+
+orient_now() {
+    dumpsys display 2>/dev/null | grep -o 'type=INTERNAL, valid=true, isActive=true[^}]*' \
+        | grep -o 'orientation=[0-9]' | head -1 | cut -d= -f2
+}
+
+# 外接镜像屏独立旋转对照表：手机方向 r -> 外接扫描旋转 e（显示器竖置，EDID 仍报横屏）
+# 初值按旋转合成规律填；哪个方向看着不对改对应一项即可
+EXT_ROT_0=3
+EXT_ROT_1=2
+EXT_ROT_2=1
+EXT_ROT_3=0
+
+ext_id() {
+    dumpsys display 2>/dev/null | grep -o 'type=EXTERNAL, valid=true, isActive=true, displayId=[0-9]*' \
+        | grep -o '[0-9]*$' | head -1
+}
+
+sync_ext_rot() {  # $1=手机方向 0-3
+    id=$(ext_id)
+    [ -z "$id" ] && return
+    eval want=\$EXT_ROT_$1
+    cur=$(cmd window user-rotation -d "$id" 2>/dev/null | grep -oE 'lock [0-9]' | awk '{print $2}')
+    if [ "$cur" != "$want" ]; then
+        log "外接旋转 o=$1: ${cur:-free} -> $want"
+        cmd window user-rotation -d "$id" lock "$want"
+    fi
+}
+
+mon_ov() {  # 外接 W H -> 竖屏形状 override（横屏下系统换成 WxH，与外接 1:1）
+    w=$1; h=$2
+    if [ "$w" -gt "$h" ]; then echo "${h}x${w}"; else echo "${w}x${h}"; fi
+}
+
+override_for() {  # $1=orientation $2="W H"|空
+    case "$STRATEGY" in
+        S1) echo reset ;;
+        S2) if [ -n "$2" ]; then mon_ov $2; else echo reset; fi ;;
+        S3) case "$1" in
+                1|3) if [ -n "$2" ]; then mon_ov $2; else echo reset; fi ;;
+                *)   echo reset ;;
+            esac ;;
+    esac
+}
+
+apply_canvas() {  # $1=desired(reset|WxH)
+    cur=$(wm size | grep Override | awk '{print $3}')
+    if [ "$1" = "reset" ]; then
+        [ -n "$cur" ] && { log "画布 $cur -> reset"; wm size reset; }
+    elif [ "$cur" != "$1" ]; then
+        log "画布 ${cur:-none} -> $1"; wm size $1
+    fi
+}
+
+apply_on()  { log "接入 $1x$2"; cmd window set-ignore-orientation-request true; settings put system screen_brightness_mode 0; settings put system screen_brightness 1; }
+apply_off() { log "拔出 -> 还原内屏"; cmd window set-ignore-orientation-request reset; settings put system screen_brightness_mode 1; }
+
+mode_now() {  # accel 恒 0 前提下 = user_rotation；accel=1 视为"自动"返回 -1
+    a=$(settings get system accelerometer_rotation)
+    [ "$a" = "1" ] && { echo -1; return; }
+    settings get system user_rotation
+}
+
+restore_mode() {
+    m=$(settings get secure $MODE_KEY)
+    case "$m" in 0|1|2|3)
+        settings put system accelerometer_rotation 0
+        if [ "$(settings get system user_rotation)" != "$m" ]; then
+            log "开机恢复方向 -> $m"; settings put system user_rotation "$m"
+        fi ;;
+    esac
+}
+
+learn_mode() {
+    cur=$(mode_now)
+    if [ "$cur" != "$last_mode" ]; then
+        if [ "$cur" != "-1" ]; then
+            log "方向变化 $last_mode -> $cur（磁贴）-> 记录"
+            settings put secure $MODE_KEY "$cur"
+        fi
+        last_mode=$cur
+    fi
+}
+
+ensure() {  # 每轮核对不变量（幂等）
+    o=$(orient_now); res=$(ext_res)
+    # 传感器永远关（用户明确要求：碰手机不要乱转）
+    [ "$(settings get system accelerometer_rotation)" = "0" ] || settings put system accelerometer_rotation 0
+    if [ -n "$res" ]; then
+        sync_ext_rot "$o"
+        cmd window get-ignore-orientation-request 2>/dev/null | grep -q true \
+            || { log "自愈: ignore-orientation 丢失 -> 重设"; cmd window set-ignore-orientation-request true; }
+        bm=$(settings get system screen_brightness_mode)
+        [ "$bm" = "0" ] || { log "自愈: 亮度模式 $bm -> 0"; settings put system screen_brightness_mode 0; settings put system screen_brightness 1; }
+    else
+        cmd window get-ignore-orientation-request 2>/dev/null | grep -q true \
+            && { log "自愈: 无外接但 ignore 仍开 -> 清掉"; cmd window set-ignore-orientation-request reset; }
+    fi
+    apply_canvas "$(override_for "$o" "$res")"
+    # 密度自愈：320dpi 是平板分支的前提（sw800dp），被 reset 会导致优酷等回手机布局
+    cur_d=$(wm density | grep Override | awk '{print $3}')
+    [ "$cur_d" = "$DENSITY" ] || { log "自愈: 密度 ${cur_d:-none} -> $DENSITY"; wm density $DENSITY; }
+}
+
+log "=== 手机端 watcher 启动 pid=$$ strategy=$STRATEGY interval=${INTERVAL}s ==="
+restore_mode
+last_mode=$(mode_now)
+last_u=$(settings get system user_rotation)
+last=""
+tick=0
+while :; do
+    # 快路径（每轮，便宜）：方向一变立刻同步外接旋转，避免"转完等几秒才满屏"
+    u=$(settings get system user_rotation)
+    if [ "$u" != "$last_u" ]; then
+        last_u=$u
+        if [ -n "$(ext_res)" ]; then
+            sync_ext_rot "$u"
+            log "方向 -> $u，外接旋转已同步"
+        fi
+    fi
+    tick=$((tick + 1))
+    if [ $((tick % 3)) -eq 0 ]; then
+        o=$(orient_now); res=$(ext_res)
+        key="o=$o ext=$res"
+        if [ "$key" != "$last" ]; then
+            if [ -n "$res" ]; then apply_on ${res% *} ${res#* }; else apply_off; fi
+            last=$key
+        fi
+        ensure
+        learn_mode
+    fi
+    sleep $INTERVAL
+done
