@@ -20,11 +20,11 @@ javac -nowarn -encoding UTF-8 -source 8 -target 8 -classpath "$AJ" -d build/obj 
   build/gen/dev/zflip5/orienttile/*.java src/dev/zflip5/orienttile/*.java
 
 echo "== d8"
-"$BT/d8.bat" --release --min-api 24 --lib "$AJ" --output build/dex build/obj/dev/zflip5/orienttile/*.class
+"$BT/d8.bat" --release --min-api 26 --lib "$AJ" --output build/dex build/obj/dev/zflip5/orienttile/*.class
 
 echo "== 合入 classes.dex"
 python - <<'PY'
-import zipfile, shutil
+import zipfile, shutil, os
 src = 'build/base.apk'
 dst = 'build/unaligned.apk'
 zin = zipfile.ZipFile(src)
@@ -32,6 +32,17 @@ zout = zipfile.ZipFile(dst, 'w', zipfile.ZIP_DEFLATED)
 for item in zin.infolist():
     zout.writestr(item, zin.read(item.filename))
 zout.write('build/dex/classes.dex', 'classes.dex')
+# 可选：把设备内 adb 客户端打进 APK（self-adb 复活守护那条链路才需要）
+#   jni/arm64-v8a/ 里放 libadbexec.so(=adb 可执行文件) + 它的全部 .so，
+#   来源见 docs/08-self-adb.md（Termux android-tools，逐个校验 sha256）。
+#   这些二进制不入库（.gitignore 已挡），构建前自行准备。
+n = 0
+if os.path.isdir('jni/arm64-v8a'):
+    for root, _, files in os.walk('jni/arm64-v8a'):
+        for f in files:
+            zout.write(os.path.join(root, f), 'lib/arm64-v8a/' + f)
+            n += 1
+print('classes.dex + %d native libs added' % n)
 zout.close(); zin.close()
 print('classes.dex added')
 PY

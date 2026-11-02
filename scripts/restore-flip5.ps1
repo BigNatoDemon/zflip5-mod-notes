@@ -94,6 +94,7 @@ $cur = ShRead 'settings get secure sysui_qs_tiles'
 $parts = @($cur -split ',' | Where-Object { $_ -and ($_ -notmatch 'orienttile') })
 $parts += 'custom(dev.zflip5.orienttile/.RotateCwTileService)'
 $parts += 'custom(dev.zflip5.orienttile/.RotateCcwTileService)'
+$parts += 'custom(dev.zflip5.orienttile/.FixTileService)'
 Sh "cmd statusbar set-tiles '$($parts -join ',')'" | Out-Null
 Start-Sleep 4   # SystemUI 落盘有延迟，立刻读会少算
 Log ("磁贴列表含 orienttile 条目数 = " + (@(ShRead 'settings get secure sysui_qs_tiles' -split ',' | Where-Object { $_ -match 'orienttile' }).Count))
@@ -163,4 +164,4 @@ foreach ($c in $checks) {
     $n = (@($v -split "`n" | Where-Object { $_ -like "*$($c[2])*" }).Count)
     Log ("{0,-12} 命中 {1}  ({2})" -f $c[0], $n, ($v -replace "`n", ' | '))
 }
-Log '完成。下一步：跑 register-autostart.ps1 重建开机任务，再跑 flip5-display-profile.ps1 常驻 watcher。'
+Log '完成。手机端 watcher 已由本脚本拉起；此后手机重启由 App 的 BootReceiver 自动复活它（见 docs/08-self-adb.md）。'

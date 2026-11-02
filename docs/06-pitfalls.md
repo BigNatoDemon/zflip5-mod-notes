@@ -53,3 +53,23 @@
   → 定向广播喊不到轮换后的手机 → 10s 直连超时（`HidHostService msg.what=30`），全程无 SMP 失败日志
 - 电视盒子用固定 LE 地址所以正常——"电视好用手机不好用"的根因
 - 手机侧无开关可关 RPA（隐私特性，需 root/厂商属性）；缓解=遥控广播态组合键或 USB 接收器
+
+## App ↔ shell 通道（One UI / Android 11+）
+
+- App **写**自定义 `Settings.System` 键一律抛 `IllegalArgumentException: You cannot keep your settings in the secure settings.`（`SettingsProvider.warnOrThrowForUndesiredSecureSettingsMutationForTargetSdk`）；**把 targetSdk 从 34 降到 28 不解决**。白名单公开键（`user_rotation`、`accelerometer_rotation`）可以写。
+- App **读**自定义键静默返回默认值（不报错）→ 表现为"永远读到 0"，别误判成守护掉线。
+- shell 在 App 的 `Android/data/<pkg>/files/` 里建的文件，App 看不见，**chmod 666 也没用**（按 uid 隔离，不看 mode）。反方向可行：App 建的文件 shell 能读能删。
+- 所以唯一可用的触发通道 = **App 写自己外部目录里的文件，shell 轮询读取**；存活信号用"请求文件是否已被 shell 删除"表达。
+
+## Quick Settings 磁贴
+
+- `STATE_UNAVAILABLE` 的磁贴**点击被 One UI 吞掉** → 磁贴要永远 `STATE_ACTIVE`，否则"读不到心跳→置灰→再也点不动"自锁。
+- 重装 APK 后 SystemUI 沿用缓存的旧 tile 状态且不重新 bind（日志只有 `handleSetListening true`，没有 `Start proc`）。修法：把该磁贴从 `sysui_qs_tiles` 摘掉再写回；**副作用是 One UI 会重排面板位置**。
+- `cmd statusbar click-tile <spec>` 在本机是空操作，不能当探针。真点击要 `cmd statusbar collapse; sleep 1; cmd statusbar expand-settings; sleep 2; input tap X Y` 连成一条 adb 调用（面板会自己收起，且息屏后一切 tap 无效）。
+- 别为验证磁贴外观去猜坐标：`uiautomator dump` 拿不到 QS 磁贴节点。
+
+## 自匹配探针（第 N 次记录）
+
+- 远端 shell：同一条命令里既含裸脚本路径又含 `pkill/pgrep -f` 会杀掉执行命令的自己 → 拆两次调用，或用 `'phone-watche[r]'`。
+- PowerShell：`Get-CimInstance ... -like '*flip5*display*profile*'` 会匹配到**执行查询的那个 shell 自身命令行**（里面字面含任务名），于是"杀了又活"像是进程重生。用 `'flip5-display-profil'+'[e].ps1'` 且排除 `$PID`。
+- `adb reboot` 在有多个 transport 时报 `more than one device/emulator` 而**静默不重启**，若后面接了 `; sleep` 看起来就像"重启没生效"。要先 `adb devices` 数清楚，用 `-s <serial>`/`-t <id>` 指定。

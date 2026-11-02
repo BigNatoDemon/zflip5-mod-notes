@@ -56,15 +56,16 @@ sh "pkill -f 'phone-watche[r]'"                            # separate call!
 sh "setsid sh /data/local/tmp/phone-watcher.sh >/dev/null 2>&1 < /dev/null &"
 sh "pgrep -f 'phone-watche[r]' | tr '\n' ' '"               # expect 2 (wrapper+worker)
 sh "tail -5 /data/local/tmp/flip5-profile-phone.log"
-# pc
-powershell -File <ws>\flip5-restore\register-autostart.ps1  # (re)create + start task
-Get-ScheduledTask Flip5DisplayProfile | % State
-type <ws>\flip5-profile.log                                 # UTF-8
+# PC watcher retired 2026-11-02; scripts archived under <ws>\flip5-restore\pc-watcher-archive\
+# To bring it back: copy the two .ps1 out, then
+#   powershell -File <archive>\register-autostart.ps1
+#   Get-ScheduledTask Flip5DisplayProfile | % State
+# (both scripts hardcode <ws> paths - fix them if you move things)
 ```
 
 ## Tile app rebuild / reinstall
 ```
-bash <ws>/orient-tile/build.sh                  # needs a local JDK 17 (build.sh honors $JDK) on PATH via JAVA_HOME inside
+bash <ws>/orient-tile/build.sh                  # needs $SDK\jdk on PATH via JAVA_HOME inside
 adb -t $T install -r <ws>\orient-tile\dist\orient-tile.apk
 sh "cmd appops set dev.zflip5.orienttile WRITE_SETTINGS allow"
 # refresh panel list (read, dedupe orienttile, append both, write; re-read after 4s)
@@ -74,8 +75,7 @@ sh "cmd statusbar set-tiles '<list>'"
 
 ## Restore package (post flash)
 ```
-powershell -File <ws>\flip5-restore\restore-flip5.ps1          # add -DryRun to preview
-powershell -File <ws>\flip5-restore\register-autostart.ps1
+powershell -File <ws>\flip5-restore\restore-flip5.ps1          # add -DryRun to preview; step 6b starts the phone watcher
 ```
 Preconditions: FRP passed, Auto Blocker OFF, wireless debugging paired.
 

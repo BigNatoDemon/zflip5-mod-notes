@@ -9,6 +9,7 @@
 
 ## Self-match kills (three separate incidents)
 - Remote shell: a command containing BOTH a bare script path and `pkill/pgrep -f` kills the shell running it. Split into separate adb calls; or use bracket trick `'phone-watche[r]'` AND keep the bare path out of that same call.
+- Same trap on the Windows side: a `Get-CimInstance Win32_Process` filter whose `-match`/`-like` pattern text also appears in your own command line (e.g. the task name `Flip5DisplayProfile` matching `*flip5*display*profile*`) makes the probe kill itself, and the respawning pids look like the watcher refuses to die. Use a bracketed pattern (`flip5-display-profil` + `[e].ps1`) and exclude `$PID`; the query command line never contains that literal.
 - PC PowerShell: filtering `Win32_Process` by a pattern that appears in your own `-Command` string kills your own powershell mid-pipeline (output truncates mysteriously). Build patterns from concatenated parts and exclude `$PID`.
 
 ## Empty/odd output traps
@@ -45,3 +46,13 @@
 - Symptom "paired but tap does nothing, must re-pair": phone initiates direct LE connect, 10s timeout (`HidHostService msg.what=30`), zero advertisements from remote, NO SMP failures → not a key mismatch.
 - Root cause model: phone rotates its LE address (RPA, ~7-14min); remote is LE-Legacy (`SecureConn:F`) and only directs wake advertisements at the address it bonded with → stale target → silence. TV boxes use static addresses, hence "works on TV".
 - Mitigations: combo-key broadcast mode (主页+菜单 / OK+返回 3-5s) at connect time, or a USB-C dongle remote. Phone-side has no fix (rotation is a privacy feature, no knob, no root).
+
+## App <-> shell 通道（One UI / Android 11+）
+
+- App **写**自定义 `Settings.System` 键一律抛 `IllegalArgumentException: You cannot keep your settings in the secure settings.`；把 targetSdk 从 34 降到 28 **不解决**。白名单公开键（`user_rotation`、`accelerometer_rotation`）可以写。
+- App **读**自定义键静默返回默认值（不报错）—— 表现为"永远读到 0"，别误判成守护掉线。
+- shell 在 App 的 `Android/data/<pkg>/files/` 里创建的文件，App 看不见；**chmod 666 也没用**（按 uid 隔离）。反方向可行：App 建的文件 shell 能读能删。
+- 结论：**唯一可用的触发通道 = App 写自己外部目录里的文件，shell 轮询读取**；反向（shell 通知 App）不可得。存活信号用"请求文件是否已被 shell 删除"表达。
+- TileService 状态陷阱：`STATE_UNAVAILABLE` 的磁贴**点击被 One UI 吞掉** → 永远保持 `STATE_ACTIVE`，否则"读不到心跳→置灰→再也点不动"自锁。
+- 重装 APK 后 SystemUI 用缓存的旧 tile 状态、不重新 bind（日志里只有 `handleSetListening true`，没有 `Start proc`）。修法：把该磁贴从 `sysui_qs_tiles` 摘掉再写回（副作用：One UI 重排面板位置）。
+- `cmd statusbar click-tile <spec>` 在本机是空操作，不能当探针。真点击要用 `cmd statusbar collapse; sleep 1; cmd statusbar expand-settings; sleep 2; input tap X Y` 连成一条 adb 调用（面板会自己收起）。

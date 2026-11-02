@@ -3,3 +3,7 @@ orient-tile/orient.jks
 orient-tile/dist/
 orient-tile/build/
 *.log
+# self-adb 用的 adb 二进制与依赖库（不入库，构建前按 docs/08 自行下载校验）
+orient-tile/jni/
+*.deb
+*.so

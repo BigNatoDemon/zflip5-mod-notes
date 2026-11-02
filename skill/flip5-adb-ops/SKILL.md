@@ -7,27 +7,24 @@ description: Operate and recover the Samsung Galaxy Z Flip5 (SM-F7310/b5q, TGY) 
 
 ## Overview
 
-This directory is the **publishable variant** of the skill: personal paths/serials are placeholdered.
-The maintainer's machine keeps a private working copy with real paths; when in doubt, trust the scripts in `../scripts/`.
-
 One phone (SM-F7310, TGY) used as a wall/monitor media box: inner screen mirrored over USB-C DP to a **physically pivoted (portrait) monitor**, driven by a Bluetooth remote and a self-built orientation tile. All state is reproducible from the workspace restore package; this skill encodes the non-obvious mechanics and the pitfalls that cost hours.
 
-## Artifact map (this repo)
+## Artifact map (workspace `<ws>`)
 
 | Path | Role |
 |---|---|
-| `docs/ in this repo` | authoritative runbook (read this first for full procedures) |
-| `scripts/restore-flip5.ps1` | one-shot post-flash restore (apps, HOME role, disables, settings, canvas, phone watcher) |
-| `scripts/register-autostart.ps1` | (re)create scheduled task `Flip5DisplayProfile` |
-| `scripts/phone-watcher.sh` | on-phone watchdog+worker loop (shell uid, no PC needed) |
-| `scripts/flip5-probe.sh` | invariant dump = ground truth (run it after any change) |
-| `flip5-display-profile.ps1` | PC watcher (same logic, cross-guard relaunches phone watcher) |
+| `flip5-restore/README.md` | authoritative runbook (read this first for full procedures) |
+| `flip5-restore/restore-flip5.ps1` | one-shot post-flash restore (apps, HOME role, disables, settings, canvas, phone watcher) |
+| `flip5-restore/phone-watcher.sh` | on-phone watchdog+worker loop (shell uid, no PC needed) |
+| `flip5-restore/state-snapshot.txt` | last captured ground truth (refresh after any change) |
+| `orient-tile/` (v2.1+) | ships an arm64 **adb client** + its libs in `jni/arm64-v8a/`; `Adb.java` = exec + `keygen` + NSD port discovery; never commit `jni/` or any `.android/adbkey` |
+| `flip5-restore/pc-watcher-archive/` | **retired PC watcher** (2026-11-02): `flip5-display-profile.ps1` + `register-autostart.ps1` + old log, kept for re-enablement; task `Flip5DisplayProfile` is unregistered |
 | `orient-tile/` | tile app source + `build.sh` + persistent `orient.jks` + `dist/orient-tile.apk` |
 | `sam/` | Odin firmware five-piece (CSC is OZS while phone is TGY - never flash its CSC slot); dir gets reorganized by the user, `ls` before use |
 
 ## Connect
 
-- adb = `D:\Android\Sdk\platform-tools\adb.exe`. In Git Bash: `export MSYS2_ARG_CONV_EXCL="*"` and pass **Windows paths** to push/install (`/d/...` becomes `C:/Program Files/Git/d/...` otherwise).
+- adb = `$SDK\Sdk\platform-tools\adb.exe`. In Git Bash: `export MSYS2_ARG_CONV_EXCL="*"` and pass **Windows paths** to push/install (`/d/...` becomes `C:/Program Files/Git/d/...` otherwise).
 - Device enumerates as an mDNS name; **use `adb -t <transport_id>`** parsed from `adb devices -l`. `-s <serial>` fails; transport id changes every reconnect.
 - After a flash/factory reset pairing is wiped: `adb mdns services` lists `_adb-tls-pairing`/`_adb-tls-connect` endpoints; **pairing port != connect port**; user reads the 6-digit code from the phone dialog, then `adb pair <ip>:<pairport> <code>`.
 - Wireless debugging **auto-reconnects after phone reboot** (`adb_wifi_enabled` persists) but **drops whenever the screen sleeps** - "device offline" usually means screen off, not broken.
@@ -45,14 +42,15 @@ One phone (SM-F7310, TGY) used as a wall/monitor media box: inner screen mirrore
 
 ## Watchers
 
-- PC: `flip5-display-profile.ps1` under scheduled task `Flip5DisplayProfile` (logon trigger, hidden, self-restart). Phone: `phone-watcher.sh` = watchdog wrapper + `worker` arg; worker killed → respawn in 2s.
+- **Single layer: phone only.** `phone-watcher.sh` = watchdog wrapper + `worker` arg; worker killed → respawn in 2s. Its `ensure()` covers canvas, density, brightness, ignore-orientation, ext rotation table, plug/unplug - everything the old PC watcher did.
+- PC watcher + logon task retired 2026-11-02 (duplicate logic, and every adb write it sent was a silent no-op whenever Auto Blocker was back on). Scripts archived, not deleted.
 - Kill patterns: worker only `pkill -f 'phone-watcher.sh worker'`; everything `pkill -f 'phone-watche[r]'`. **Never put a bare script path and pkill/pgrep in the same adb shell command** - the remote shell matches its own cmdline and kills itself (split into two adb calls).
 - Liveness: `pgrep -f phone-watche[r]`; **never `ps -A | grep`** (toybox ps shows only `sh`).
-- Coverage matrix: worker killed → wrapper; watcher gone or phone rebooted → PC cross-guard on adb reconnect; PC asleep too → gap, accepted (no root, no boot shell hook; Shizuku rejected as it needs a pairing code every boot).
+- Coverage matrix: worker killed → wrapper. Phone rebooted → **the `orient-tile` app revives it**: `BootReceiver` → `ReviveService` (foreground service; background starts are blocked by Samsung) → `NsdManager` resolves `_adb-tls-connect._tcp` for the current wireless-debugging port → bundled adb (`lib/arm64-v8a/libadbexec.so` + 112 .so, `extractNativeLibs=true`) connects to `127.0.0.1:<port>` with the app's own paired key → `setsid` the watcher. Measured: back up 31 s after reboot, no PC. Fallback if the app is missing: reconnect adb and run `restore-flip5.ps1`.
 
 ## Tile app
 
-- Two tiles 顺时针/逆时针 (±90°, four orientations, always accel=0). Build: `orient-tile/build.sh` (aapt2/javac/d8/zipalign/apksigner; JDK `a local JDK 17 (build.sh honors $JDK)`; javac needs `-encoding UTF-8`). **`orient.jks` must persist** - new cert = `INSTALL_FAILED_UPDATE_INCOMPATIBLE` = uninstall+reinstall (loses tile slots + appops grant).
+- Two tiles 顺时针/逆时针 (±90°, four orientations, always accel=0). Build: `orient-tile/build.sh` (aapt2/javac/d8/zipalign/apksigner; JDK `$SDK\jdk`; javac needs `-encoding UTF-8`). **`orient.jks` must persist** - new cert = `INSTALL_FAILED_UPDATE_INCOMPATIBLE` = uninstall+reinstall (loses tile slots + appops grant).
 - Install extras: `cmd appops set dev.zflip5.orienttile WRITE_SETTINGS allow`; on One UI `cmd statusbar add-tile` only fills the candidate pool - put tiles into the panel with `cmd statusbar set-tiles '<list>,custom(pkg/.RotateCwTileService),custom(pkg/.RotateCcwTileService)'`; SystemUI persists the list with a few seconds delay.
 - Apps **cannot write custom keys to Settings.System** (`IllegalArgumentException: You cannot keep your settings in the secure settings`, tile shows "运行错误"). Derive mode from `user_rotation`/`accelerometer_rotation` instead.
 
@@ -62,8 +60,7 @@ One phone (SM-F7310, TGY) used as a wall/monitor media box: inner screen mirrore
 2. Turn **Auto Blocker off** (else every adb write silently fails).
 3. Pair wireless debugging (code from phone dialog).
 4. `restore-flip5.ps1` (idempotent; verifies firmware whitelist `F7310ZSU9HZIJ`/`F7310ZSS9GZI1`, installs Aerial/SmartTube/tile, HOME role, 15 disables, settings, canvas, phone watcher).
-5. `register-autostart.ps1`.
-6. User plug/unplug test; re-run `scripts/flip5-probe.sh` as ground truth.
+5. User plug/unplug test; refresh `state-snapshot.txt`. (No PC logon task any more - `phone-watcher.sh` is started by step 6b of the restore script.)
 Known exceptions: `com.google.android.gms.supervision` and `com.samsung.android.knox.zt.framework` are protected on current firmware - shell disable throws; manual Settings UI only. Never flash `sam/` CSC_OZS (region change + wipe).
 
 ## Verify (ASCII-safe one-liner)

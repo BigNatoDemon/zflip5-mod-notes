@@ -1,15 +1,14 @@
-# 04 双端 watcher 与自愈
+# 04 watcher 与自愈（单层：只在手机上跑）
 
-## 分工
+## 现状
 
-| | PC 端 `flip5-display-profile.ps1` | 手机端 `phone-watcher.sh` |
-|---|---|---|
-| 权限 | adb shell（经无线 adb） | 本机 shell（/data/local/tmp，setsid 后台） |
-| 触发 | 3s 轮询 | 2s 轮询（快路径 1 个 settings 读） |
-| 职责 | 插拔切档、不变量自愈、**交叉守护拉起手机端**、开机任务托管 | 插拔切档、不变量自愈、**电脑不在时独立工作** |
-| 存活 | 计划任务 `Flip5DisplayProfile`（登录触发、隐藏、失败重试） | watchdog 外壳 + worker 双循环 |
+常驻层只有手机端 `phone-watcher.sh`：本机 shell（`/data/local/tmp`，`setsid` 后台，2 秒快路径轮询）。
+`ensure()` 每轮核对并补写画布 override、`ignore-orientation-request`、亮度、密度 320、外接扫描旋转（按表），
+外加插拔切档与方向学习——这就是当初 PC 端 watcher 的全部职责。
 
-两者动作**幂等**，同时跑不冲突。
+PC 端 `flip5-display-profile.ps1` 与登录计划任务已于 2026-11-02 退役，脚本留在 `archive/pc-watcher/`。
+理由：逻辑完全重复；且它每个写命令都要经过 adb，三星「自动拦截程序」一开就全部静默失效，而手机端走本机 shell 不受影响。
+**两端并跑还会打架**（见下方"事实源不一致"）。
 
 ## 状态机（两端同构）
 
@@ -41,17 +40,24 @@ pgrep -f 'phone-watche[r]'           # 判活；期望 2（外壳+worker）
 | 故障 | 谁补 |
 |---|---|
 | worker 被杀 | 外壳 2s |
-| 手机端 watcher 全没 / 手机重启 | PC 交叉守护（adb 回连后 ≤ 一个轮询周期） |
-| PC 睡眠/关机 | 手机端独立工作 |
-| 手机重启 **且** PC 长睡 | **空窗**（无 root 没有 boot 时 shell 钩子；Shizuku 需每开机输配对码，评估后不采用）；PC 醒后自愈 |
+| 手机端 watcher 全没 / 手机重启 | **App 的 self-adb 链路自动拉起**（见 08），实测重启后 31 秒就位 |
+| 电脑睡眠/关机/不在 | 手机端独立工作（实测断联期间拔插外屏两档都自动完成） |
+| App 被卸载/强制停止、无线调试被关 | **空窗**：self-adb 连不上，需重连电脑跑一次 `restore-flip5.ps1` |
 
-## PC 端运维
+## 事实源不一致 = 双跑必打架（2026-11-02 实踩）
+
+PC 版判方向读的是 `dumpsys display` 里**第一个 `type=INTERNAL, isActive=true` 的 viewport `orientation`**，
+而 Flip5 有**两块 INTERNAL 屏**（外屏 FlexWindow 的 `installOrientation=1`，天然躺 90°）。合盖/外屏活动期它会
+误判成横档、把外接锁成错的值；手机端按 `user_rotation` 要另一个值 → 两边几秒内互相顶（日志里 `2 -> 3 -> 2` 就是铁证）。
+**方向的事实源只能是 `user_rotation`**，手机版已改成这样。
+
+## 运维
 
 ```
-powershell -File scripts\register-autostart.ps1        # 重建/启动计划任务（watcher 缺失时自动从同目录副本补）
-Get-ScheduledTask Flip5DisplayProfile | % State
-Unregister-ScheduledTask -TaskName Flip5DisplayProfile -Confirm:$false   # 撤销
-# 重启实例加载新代码时：按命令行精确匹配旧 powershell 再杀（过滤串用拼接构造并排除 $PID，避免自杀）
+pgrep -f 'phone-watche[r]'                       # 判活，期望 2（外壳+worker）
+pkill -f 'phone-watche[r]'                        # 全杀（括号 trick 防自匹配）
+setsid sh /data/local/tmp/phone-watcher.sh >/dev/null 2>&1 < /dev/null &   # 手动拉起
+tail /data/local/tmp/flip5-profile-phone.log      # 决策日志
 ```
 
-日志：PC 端 `flip5-profile.log`（UTF-8），手机端 `/data/local/tmp/flip5-profile-phone.log`。
+日志：手机端 `/data/local/tmp/flip5-profile-phone.log`；PC 端历史日志在 `archive/pc-watcher/`。

@@ -23,11 +23,12 @@
 |---|---|
 | `docs/01-connect.md` | 无线 adb 接入：配对、transport、掉线规律、Auto Blocker |
 | `docs/02-display-recipe.md` | 镜像几何定律、画布 override 写法、密度 320 的意义、外接屏独立旋转表 |
-| `docs/03-rotation-tiles.md` | 自研顺/逆时针磁贴 App：设计、构建、安装、模式事实源 |
-| `docs/04-watchers.md` | PC + 手机双 watcher：职责、自愈、watchdog、覆盖矩阵 |
+| `docs/03-rotation-tiles.md` | 自研顺/逆时针 + 「修复画面」磁贴 App：设计、构建、安装、模式事实源 |
+| `docs/04-watchers.md` | 手机端单层 watcher：自愈不变量、watchdog、覆盖矩阵、双跑打架的教训 |
 | `docs/05-restore.md` | 刷机/恢复出厂后的一键恢复与存活性矩阵 |
 | `docs/06-pitfalls.md` | 坑清单（每条都是真踩过的） |
 | `docs/07-bluetooth-remote.md` | 蓝牙遥控"第二次连接要重新配对"的定位与模型 |
+| `docs/08-self-adb.md` | **App 内跑 adb 连本机 adbd**：让手机重启后无人值守拉起 shell 守护（取材校验、打包、钥匙、NSD、开机链路） |
 | `scripts/` | 四个运维脚本（路径已参数化，见各文件头注释） |
 | `orient-tile/` | 磁贴 App 完整源码 + 手工打包脚本（不依赖 Gradle） |
 | `skill/flip5-adb-ops/` | 本机专用 skill 的发布变体（路径占位化）；本机另有一份带真实路径的工作副本 |
@@ -50,8 +51,8 @@ adb pair <ip>:<pairport> <6位码>
 # 2) 关 Samsung「设置 → 安全与隐私 → 自动拦截程序」(否则 adb 写命令静默失败)
 # 3) 一键恢复（脚本目录即仓库 scripts/）
 powershell -File scripts\restore-flip5.ps1
-powershell -File scripts\register-autostart.ps1
-# 4) 手机侧 watcher 由 restore 脚本 push 并拉起；拔插外接屏验收两档切换
+# 4) 手机端 watcher 由 restore 脚本 push 并拉起（唯一常驻层，不需要电脑）；拔插外接屏验收两档切换
+#    手机重启后由 App 的 BootReceiver + 设备内 adb 自动复活守护，见 docs/08-self-adb.md
 ```
 
 ## 许可

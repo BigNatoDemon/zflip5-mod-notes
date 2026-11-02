@@ -11,12 +11,14 @@
 
 ```powershell
 powershell -File scripts\restore-flip5.ps1          # -DryRun 预览；-SkipPackages 跳过禁用预装
-powershell -File scripts\register-autostart.ps1     # 开机任务 + 启动 PC watcher
 ```
 
 `restore-flip5.ps1` 依次：等设备 → 核对固件白名单 → 装 Aerial/SmartTube → 装磁贴+授权+上屏 →
 设 HOME 角色 → 禁用预装清单 → 写 settings（含密度 320、方向默认键）→ 按外接屏分辨率设画布 →
-push 并 setsid 拉起手机端 watcher → 回读校验打印。脚本**幂等**，重跑无副作用。
+push 并 setsid 拉起手机端 watcher（唯一常驻层）→ 回读校验打印。脚本**幂等**，重跑无副作用。
+
+**手机重启后不用重跑**：磁贴 App 的 `BootReceiver` 会通过设备内 adb 自己把守护拉起来（见 08）。
+但刷机/恢复出厂会清掉配对，那之后要重新配一次钥匙。
 
 已知例外：个别包在当前固件受保护，shell 禁用会抛 SecurityException（脚本容忍并标注），
 需要禁用只能走设置界面手动。
